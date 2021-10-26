@@ -313,3 +313,11 @@ def eth_etherbone_mmap_description(dw):
 def eth_tty_description(dw):
     payload_layout = [("data", dw)]
     return EndpointDescription(payload_layout)
+
+# TTY
+def eth_packet_stream_description(dw):
+    payload_layout = [
+        ("data", dw),
+        ("last_be", dw//8)
+    ]
+    return EndpointDescription(payload_layout)
