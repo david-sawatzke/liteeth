@@ -178,6 +178,7 @@ def stream_inserter(
 
         if debug_print:
             print("Sent packet {}.".format(pi), file=sys.stderr)
+    print("Sent last packet")
 
     # All packets have been transmitted. sink.valid has already been
     # deasserted, yield once to properly apply that value.
@@ -263,6 +264,7 @@ def stream_collector(
         dest += [StreamPacket(collected_bytes, param_signal_states)]
         if debug_print:
             print("Received packet {}.".format(len(dest) - 1), file=sys.stderr)
+    print("Received last expected packet")
 
 def generate_test_packets(npackets, seed=42):
     # Generate a number of last-terminated bus transaction byte contents (dubbed
