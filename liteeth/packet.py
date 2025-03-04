@@ -53,10 +53,9 @@ class Packetizer(LiteXModule):
         self.fsm = fsm = FSM(reset_state="IDLE")
         fsm_from_idle = Signal()
         fsm.act("IDLE",
-            sink.ready.eq(1),
+            sink.ready.eq(0),
             NextValue(count, 1),
             If(sink.valid,
-                sink.ready.eq(0),
                 source.valid.eq(1),
                 source_last_a.eq(0),
                 source.data.eq(self.header[:data_width]),
