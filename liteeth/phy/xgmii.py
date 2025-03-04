@@ -418,28 +418,21 @@ class LiteEthPHYXGMIITX(LiteXModule):
         # Setting sink.ready
         self.sync += [
             If(fsm.ongoing("IDLE"),
-                If(sink.valid & (current_ifg == 3),
-                    sink.ready.eq(1),
-                ).Elif(sink.valid & (current_ifg == 2),
-                    sink.ready.eq(1),
-                ).Elif(sink.valid & (current_ifg == 1) & (last_packet_rem != 0)
-                    & (current_dic + last_packet_rem <= 3),
-                        sink.ready.eq(1),
-                ).Else(
+                If((sink.valid & ((current_ifg == 3) | (current_ifg == 2) | (current_ifg == 1) & (last_packet_rem != 0)
+                        & (current_dic + last_packet_rem <= 3)))
                     # Accept more data if we've had a sufficiently large inter-frame
                     # gap (accounting for deficit idle count). For this we need to
                     # determine whether the next sink.valid clock cycle will take a
                     # given branch of A, B or C.
-                    If((next_ifg >= 2) | ((next_ifg == 1) & (last_packet_rem != 0)
+                    | ((next_ifg >= 2) | ((next_ifg == 1) & (last_packet_rem != 0)
                         # Branch A, B or C will be taken as soon as sink.valid
                         # again, thus accept more data.
-                        & (current_dic + last_packet_rem <= 3)),
-                        sink.ready.eq(1),
-                    ).Else(
-                        # We haven't transmitted a sufficient IFG. The next
-                        # sink.valid clock cycle will not start a transmission.
-                        sink.ready.eq(0),
-                    )
+                        & (current_dic + last_packet_rem <= 3))),
+                    sink.ready.eq(1),
+                ).Else(
+                    # We haven't transmitted a sufficient IFG. The next
+                    # sink.valid clock cycle will not start a transmission.
+                    sink.ready.eq(0),
                 ),
             ).Else(
                 If(end_transmission | ~adjusted_sink_valid,
