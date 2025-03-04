@@ -69,9 +69,9 @@ class LiteEthLastHandler(LiteXModule):
         fsm.act("COPY",
             sink.connect(source),
             source.last.eq(sink.last_be != 0),
-            If(sink.valid & sink.ready,
+            If(sink.valid & source.ready,
                 # If last Byte but not last packet token.
-                If(source.last & ~sink.last,
+                If((sink.last_be != 0) & ~sink.last,
                     NextState("WAIT-LAST")
                 )
             )
