@@ -228,7 +228,6 @@ class LiteEthPHYXGMIITX(LiteXModule):
             pads.tx_ctl.eq(0x01),
             pads.tx_data.eq(Cat(XGMII_START, sink.data[8:dw])),
             NextValue(transmit_shifted, 0),
-            NextValue(sink.ready, 1),
             NextState("TRANSMIT"),
         ]
 
@@ -254,7 +253,6 @@ class LiteEthPHYXGMIITX(LiteXModule):
             )),
             ifg_reset.eq(1),
             NextValue(transmit_shifted, 1),
-            NextValue(sink.ready, 1),
             NextState("TRANSMIT"),
         ]
 
@@ -306,22 +304,6 @@ class LiteEthPHYXGMIITX(LiteXModule):
                 pads.tx_data.eq(Cat(*([XGMII_IDLE] * 8))),
                 ifg_add_double.eq(1),
 
-                # Accept more data if we've had a sufficiently large inter-frame
-                # gap (accounting for deficit idle count). For this we need to
-                # determine whether the next sink.valid clock cycle will take a
-                # given branch of A, B or C.
-                If((next_ifg >= 2)
-                   | ((next_ifg == 1) & (last_packet_rem != 0)
-                      & (current_dic + last_packet_rem <= 3)),
-                    # Branch A, B or C will be taken as soon as sink.valid
-                    # again, thus accept more data.
-                    NextValue(sink.ready, 1),
-                ).Else(
-                    # We haven't transmitted a sufficient IFG. The next
-                    # sink.valid clock cycle will not start a transmission.
-                    NextValue(sink.ready, 0),
-                ),
-
                 # If we've remained in IDLE because the sink is not yet valid,
                 # even though the full IFG has been sent already, remove any
                 # deficit idle count. We've made up for that by now.
@@ -363,12 +345,6 @@ class LiteEthPHYXGMIITX(LiteXModule):
                 pads.tx_data.eq(Cat(XGMII_END, Replicate(XGMII_IDLE, 7))),
                 # Also, we're transmitting 64 bits worth of idle characters.
                 ifg_add_double.eq(1),
-                # We're transmitting 8 bytes of IFG in this cycle. Thus we know
-                # that in the next cycle we can for sure start a new
-                # transmission, irrespective of whether we use DIC (either on
-                # the first or fifth byte in the 64-bit word). Thus set
-                # sink.ready accordingly.
-                NextValue(sink.ready, 1),
                 # Packet transmission is complete, return to IDLE and reset the
                 # end_transmission register.
                 NextValue(end_transmission, 0),
@@ -425,46 +401,89 @@ class LiteEthPHYXGMIITX(LiteXModule):
                 # control characters. This happens if we remain in the TRANSMIT
                 # state.
                 If(adjusted_sink_valid_last_be == 0,
-                    # This hasn't been the last bus word. However, before we can
-                    # tell the data sink to send us additional data, in case
-                    # we're performing a shifted transmission, we must see
-                    # whether the current sink data word already indicates the
-                    # end of data in it's upper half. If so, we must not request
-                    # additional data. Otherwise we could loose valid data, as
-                    # we're transmitting the IFG first.
-                    If(transmit_shifted & sink.last
-                       & ((sink.last_be & 0xF0) != 0),
-                        # We're in a shifted transmit and already have received
-                        # the last data bytes from the sink.
-                        NextValue(sink.ready, 0),
-                    ).Else(
-                        # Everything's good, the sink hasn't yet asserted last.
-                        NextValue(sink.ready, 1),
-                    ),
+                    # This hasn't been the last bus word.
                     NextState("TRANSMIT"),
                 ).Elif(adjusted_sink_valid_last_be == (1 << 7),
                     # Last data word, but all bytes were valid. Thus we still
                     # need to transmit the XGMII end control character.
                     NextValue(end_transmission, 1),
-                    NextValue(sink.ready, 0),
                     NextState("TRANSMIT"),
                 ).Else(
-                    # We did already transmit the XGMII end control
-                    # character. Depending on the interframegap sent as part of
-                    # this cycle and the current deficit idle count, we might
-                    # already be able to accept data in the next clock cycle.
-                    If((next_ifg >= 2)
-                       | ((next_ifg == 1) & (last_packet_rem != 0)
-                          & (current_dic + last_packet_rem <= 3)),
-                        NextValue(sink.ready, 1),
-                    ).Else(
-                        NextValue(sink.ready, 0),
-                    ),
+                    # We did already transmit the XGMII end control character.
                     NextState("IDLE"),
                 )
             )
         )
 
+        # Setting sink.ready
+        self.sync += [
+            If(fsm.ongoing("IDLE"),
+                If(sink.valid & (current_ifg == 3),
+                    sink.ready.eq(1),
+                ).Elif(sink.valid & (current_ifg == 2),
+                    sink.ready.eq(1),
+                ).Elif(sink.valid & (current_ifg == 1) & (last_packet_rem != 0)
+                    & (current_dic + last_packet_rem <= 3),
+                        sink.ready.eq(1),
+                ).Else(
+                    # Accept more data if we've had a sufficiently large inter-frame
+                    # gap (accounting for deficit idle count). For this we need to
+                    # determine whether the next sink.valid clock cycle will take a
+                    # given branch of A, B or C.
+                    If((next_ifg >= 2) | ((next_ifg == 1) & (last_packet_rem != 0)
+                        # Branch A, B or C will be taken as soon as sink.valid
+                        # again, thus accept more data.
+                        & (current_dic + last_packet_rem <= 3)),
+                        sink.ready.eq(1),
+                    ).Else(
+                        # We haven't transmitted a sufficient IFG. The next
+                        # sink.valid clock cycle will not start a transmission.
+                        sink.ready.eq(0),
+                    )
+                ),
+            ).Else(
+                If(end_transmission | ~adjusted_sink_valid,
+                    # We're transmitting 8 bytes of IFG in this cycle. Thus we know
+                    # that in the next cycle we can for sure start a new
+                    # transmission, irrespective of whether we use DIC (either on
+                    # the first or fifth byte in the 64-bit word). Thus set
+                    # sink.ready accordingly.
+                    sink.ready.eq(1),
+                ).Else(
+                    If(adjusted_sink_valid_last_be == 0,
+                        # This hasn't been the last bus word. However, before we can
+                        # tell the data sink to send us additional data, in case
+                        # we're performing a shifted transmission, we must see
+                        # whether the current sink data word already indicates the
+                        # end of data in it's upper half. If so, we must not request
+                        # additional data. Otherwise we could loose valid data, as
+                        # we're transmitting the IFG first.
+                        If(transmit_shifted & sink.last
+                            & ((sink.last_be & 0xF0) != 0),
+                            # We're in a shifted transmit and already have received
+                            # the last data bytes from the sink.
+                            sink.ready.eq(0),
+                        ).Else(
+                            # Everything's good, the sink hasn't yet asserted last.
+                            sink.ready.eq(1),
+                        ),
+                    ).Elif(adjusted_sink_valid_last_be == (1 << 7),
+                        sink.ready.eq(0),
+                    ),
+                ).Else(
+                    # Depending on the interframegap sent as part of
+                    # this cycle and the current deficit idle count, we might
+                    # already be able to accept data in the next clock cycle.
+                    If((next_ifg >= 2)
+                       | ((next_ifg == 1) & (last_packet_rem != 0)
+                          & (current_dic + last_packet_rem <= 3)),
+                        sink.ready.eq(1),
+                    ).Else(
+                        sink.ready.eq(0),
+                    ),
+                ),
+            ),
+        ]
 # LiteEth PHY XGMII RX Aligner ---------------------------------------------------------------------
 
 class LiteEthPHYXGMIIRXAligner(LiteXModule):
