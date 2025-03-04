@@ -182,9 +182,7 @@ class Packetizer(LiteXModule):
                 ),
                 If(in_data_copy,
                     sink.ready.eq(source.ready),
-                ).Elif(self.fsm.ongoing("IDLE"),
-                    sink.ready.eq(~sink.valid),
-                )
+                ),
             )
 
             self.last_be_fsm.act("DELAYED",
